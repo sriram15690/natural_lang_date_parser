@@ -23,7 +23,7 @@ Or install it yourself as:
 
 ## Usage
 
-TODO: Write usage instructions here
+    NaturalLangDateParser::Parser.new("2 weeks ago").parse_input
 
 ## Development
 

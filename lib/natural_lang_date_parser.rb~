@@ -1,4 +1,4 @@
-require "natural_lang_date_parser/version"
+#require "natural_lang_date_parser/version"
 
 module NaturalLangDateParser
 	require "date"

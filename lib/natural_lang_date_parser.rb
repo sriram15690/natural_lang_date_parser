@@ -10,7 +10,7 @@ EXISTING_PATTERNS  = {
 	past: ["before","ago", 'yesterday', 'last','previous'],
 	future: ['after','later','tomorrow','next', 'in']
 }
- class NaturalDateParser
+ class Parser
 	 
 	def initialize(datetime)
 		@current_datetime = DateTime.now

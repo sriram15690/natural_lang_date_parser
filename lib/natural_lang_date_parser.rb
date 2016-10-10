@@ -5,156 +5,145 @@ module NaturalLangDateParser
 require 'active_support/all'
 
 EXISTING_PATTERNS  = {
-	months: ['january','february','march','may','june','july','august','september', 'october','november','december'],
-	days: ['sunday','monday','tuesday', 'wednesday','thursday','friday','saturday'],
-	past: ["before","ago", 'yesterday', 'last','previous'],
-	future: ['after','later','tomorrow','next', 'in']
+	durations: 'minute|minutes|hour|hours|day|days|week|weeks|month|months|year|years',
+	relative_tense: 'last|previous|next',
+	explicit_dates: 'today|tomorrow|yesterday|day after tomorrow|day before yesterday',
+	months: 'january|february|march|may|june|july|august|september|october|november|december',
+	weekdays: 'sunday|monday|tuesday|wednesday|thursday|friday|saturday',
 }
+
  class Parser
 	 
 	def initialize(datetime)
 		@current_datetime = DateTime.now
 		@input_params = datetime
-		@formatted_params = nil
 	end
- 
+ 	
+ 	# Formatting the input before parsing.
 	def format_input
 		# removing white spaces at the beginning and the end
-		@input_params.strip()
-		@formatted_params = @input_params.split(" ").map {|x| x.downcase.singularize}
-		# p @formatted_params
-	 end
-	 
-	 def parse_input
-		# sanitise the input before processing.
-		format_input
-		
-		# check if its today 
-		if @input_params == 'today'
-				DateTime.now
-		# check if its past 
-		elsif !(@formatted_params & EXISTING_PATTERNS[:past]).empty?
-			calculate_past_date
-		# check if its future 
-		elsif !(@formatted_params & EXISTING_PATTERNS[:future]).empty?
-			calculate_future_date
-		# Fallback to Ruby Date parser
-		else 
-			# replacing noon with 12pm. Further scenarios can be added and moved to a new method in future
-			@input_params.gsub!(/noon/,'12pm')			
-			DateTime.parse(@input_params)
-		end
-	rescue
-		puts "Sorry!! Something went wrong while interpreting your input. Pls. check and try again."
-    end
+		@input_params = @input_params.downcase.strip()
+ 	end
 
-	 def calculate_past_date
-		# storing the various parameters
-		past_params = {
-			past_type: nil,
-			past_value: nil,
-			date_type: nil,
-			date_quantity: nil,
-			past_index: nil
-		}
-		
-		past_params[:past_value] = @formatted_params & EXISTING_PATTERNS[:past]
-		
-		# case for yesterday
-		if past_params[:past_value] && @formatted_params.length == 1
-			calculate_time('days',1,"ago")
-		
-		# case for string containing last or previous ( Immediate Past)
-		elsif  is_immediate_past?(past_params[:past_value])
-			# Removing preposition like on, at
-			temp_formatted_params = @formatted_params.reject{|item| item == /on|at/i }
-			
-			# check if the user is inputing a weekeday 
-			if is_weekday? temp_formatted_params[1]
-				Date.today.beginning_of_week(:temp_formatted_params[1])
-			# if its one among year, day, month
-			else 
-				calculate_time(temp_formatted_params[1],1,"ago")
+ 	# Parsing the Input provided by the user.
+ 	def parse_input 
+ 		format_input
+
+ 		p "Input is #{@input_params}"
+        #begin
+			# check if the input refers to an explicit datetime like today etc
+			if explicit_date? @input_params
+				interpret_explicit_date @input_params
+			# check if the input refers to relative input like next friday or next month etc
+			elsif relative_date? @input_params
+				interpret_relative_date @input_params
+			# check if the input refers to a past of future date and interpret it
+			elsif date = past_or_future_date(@input_params)
+				date
+			# Try Ruby Date Parser 
+			else
+				DateTime.parse(@input_params)
 			end
+ 		#rescue
+		#	p "Sorry!! Something went wrong. Pls. check and try again"	
+        #end
+ 	end
 	
-		# case for string containing ago or before etc (non-immediate past)
-		elsif !(past_params[:past_value] & ['ago','before']).empty?
-			temp_formatted_params =  @formatted_params.reject{|item| item == /on|at|ago|before/i }
-						
-			# Extracting Values
-			past_params[:date_quantity]  = temp_formatted_params[0]
-			past_params[:date_type]  = temp_formatted_params[1]
-			
-			# Calcuate Datetime
-			calculate_time(past_params[:date_type],past_params[:date_quantity].to_i,"ago")
+	# check if the input refers to an explicit datetime like today etc
+ 	def explicit_date?(date)
+ 		!(/(?<relative_date>#{EXISTING_PATTERNS[:explicit_dates]})/.match(date)).nil?
+ 	end
+
+ 	def past_or_future_date date
+ 		# when date is of the form 2 weeks ago
+ 		if parsed_data = (/(?<quantity>\d+) (?<duration>#{EXISTING_PATTERNS[:durations]}) (?<tense>ago|later|after)*/.match(date))
+ 			calculate_datetime(parsed_data[:duration], parsed_data[:quantity].to_i,find_tense(parsed_data[:tense]))
+		# when date is of the form in 3 hours 
+		elsif parsed_data = (/(?<tense>after|in|before) (?<quantity>\d+) (?<duration>#{EXISTING_PATTERNS[:durations]})/.match(date))
+			calculate_datetime(parsed_data[:duration], parsed_data[:quantity].to_i,find_tense(parsed_data[:tense]))
+		else
+			false
 		end
-	 end
-	 
-	 def calculate_future_date
-		# storing the various parameters
-		future_params = {
-			future_type: nil,
-			future_value: nil,
-			date_type: nil,
-			date_quantity: nil,
-			future_index: nil
-		}
-		future_params[:future_value] = @formatted_params & EXISTING_PATTERNS[:future]
-		
-		# case for tomorrow
-		if future_params[:future_value] == ["tomorrow"] && @formatted_params.length == 1
-			calculate_time('days',1,"from_now")
-		
-		# Case for immediate future	
-		elsif is_immediate_future? @formatted_params
-			future_params[:future_type] ='immediate'
-			future_params[:date_type]  = @formatted_params[1]
-			
-			# check if the user is inputing a weekeday 
-			# can be exteneded with options like next full moon, next christmas etc
-			if is_weekday? @formatted_params[1]
-				date_of_next @formatted_params[1]
-			# it its one among year, day, month
-			else 
-				calculate_time(@formatted_params[1],1,"from_now")
-			end
-			
-		# case for string non-immediate future like 'later','in
-		elsif !(future_params[:future_value] & ['later','in']).empty?
-			future_params[:future_type] = 'future'
-			temp_formatted_params =  @formatted_params.reject{|item| item =~ /later|in/i }
-	
-			# Extracting Values
-			future_params[:date_quantity]  = temp_formatted_params[0]
-			future_params[:date_type]  = temp_formatted_params[1]
-			calculate_time(future_params[:date_type],future_params[:date_quantity].to_i,"from_now")
+ 	end
+
+ 	# check whether date is of the form next friday or next month etc & return boolean
+ 	def relative_date? date
+ 		all_durations = EXISTING_PATTERNS[:weekdays] + EXISTING_PATTERNS[:months] + EXISTING_PATTERNS[:durations]
+ 		!(/(#{EXISTING_PATTERNS[:relative_tense]}) (#{all_durations})/.match(date)).nil? 
+ 	end
+
+ 	# asiigning values for few explicit dates like tomorrow, yesterday etc. 
+ 	def interpret_explicit_date date
+ 		case date
+	 		when 'today'
+	 			DateTime.now
+			when 'tomorrow'
+				1.days.from_now
+			when 'yesterday'
+				1.days.ago
+			when 'day after tomorrow'
+				2.days.from_now
+			when 'day before yesterday'
+				2.days.ago
+			else
+				nil
 		end
-	 end
+	end
+ 	
+ 	# Parsing relative date like next friday or next month
+ 	def interpret_relative_date date
+ 		all_durations = EXISTING_PATTERNS[:weekdays] + EXISTING_PATTERNS[:months] + EXISTING_PATTERNS[:durations]
+	 	relative_date = /(?<tense>#{EXISTING_PATTERNS[:relative_tense]}) (?<type>#{all_durations})(\s at)*/.match(date)
+
+ 		# Check if the user is referring to a weekday
+	 	if weekday?(relative_date[:type])
+ 	  		if (relative_date[:tense] == 'next')
+				date_of_next(relative_date[:type])
+	  		else
+	  			date_of_previous(relative_date[:type])
+	  		end
+	 	else
+ 			tense = (relative_date[:tense] == 'next') ? 'from_now' : 'ago'
+	 		calculate_datetime(relative_date[:type], 1, tense)
+	 	end
+ 	end
+
+
+ 	def find_tense data
+ 		if ['ago', 'before'].include? data
+ 			'ago'
+		else
+			'from_now'
+		end
+ 	end
 	 
-	 # reutrns if its a valid day of the week
-	 def is_weekday?(day)
-		day && (EXISTING_PATTERNS[:days].include? day)
-	 end
-	 
-	 # Return the next specific weekeday. Example: next tuesday
-	 def date_of_next(day)
-	  date  = Date.parse(day)
-	  delta = date > Date.today ? 0 : 7
-	  date + delta
+	# returns if its a valid day of the week
+	def weekday?(day)
+		day && (EXISTING_PATTERNS[:weekdays].split('|').include? day)
 	end
 	 
-	 def is_immediate_future?(data)
-		data.include? "next"
-	 end
+	 # Return the next specific weekeday. Example: next tuesday
+	def date_of_next(day)
+	  day_required = DateTime.parse(day)
+	  delta = day_required > DateTime.now ? 0 : 7
+	  (day_required + delta)
+	end
 	 
-	 def is_immediate_past?(data)
-		!(data & ['last', 'previous']).empty?
-	 end
+	 # Return the previous specific weekeday. Example: previous tuesday
+	def date_of_previous(day)
+	  day_required = DateTime.parse(day)
+	  delta = day_required < DateTime.now ? 0 : 7
+	  (day_required - delta)
+	end
 	 
-	 def calculate_time(type, quantity, tense)
-		type = type.pluralize
+	# Defining the DateTime object based on parameters.
+	def calculate_datetime(type, quantity, tense)
+		# converting week to days  as ruby doesnt have explicit method for week.
+		if type.singularize == 'week'
+	 		type = 'days'
+	 		quantity = quantity * 7
+	 	end
 		quantity.send(type).send(tense)
 	 end
-	 
  end
 end
